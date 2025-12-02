@@ -1,5 +1,6 @@
 use crate::game::game_scene::GameSceneType;
 use serde::{Deserialize, Serialize};
+
 /// Represents a message sent to the chat.
 ///
 /// ### Fields
@@ -32,6 +33,9 @@ pub enum MessageType {
 /// ### Types
 /// - `Error(String)`: An error event with associated data;
 /// - `Ok(String)`: A success event with associated data.
+/// - `GameScene(GameSceneType`: A game scene event with the scene to be displayed.
+/// - `Message(String)`: A message that will be sent;
+/// - `Shutdown`: A shutdown event, kills the session.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum EventSignal {
     Message(ChatMessage),

@@ -9,6 +9,15 @@ use uuid::Uuid;
 
 pub const MAX_PLAYERS_PER_SESSION: usize = 3;
 
+/// A enum that the consumer of the session can use to handle each events of the game
+/// - `PlayerJoined(String)`: this represents the entrance of a new player in a party. The consumer can start the session based on it;
+/// - `PlayerAnswer {username: String, answer: String }`: this represents an answer from one player.
+///     The consumer can compute the round results based on it;
+/// - `AdvanceTurn`: this represents the game must advance to next round. The consumer can send messages
+///     based on it and advance the game;
+/// - `GameEnding(UpdateResult)`: this represents a game ending, that can be a normal ending or
+///     a game over (the UpdateResult that indicates it). The consumer then can send properly events to handle
+///     this.
 pub enum GameEvent {
     PlayerJoined(String),
     PlayerAnswer { username: String, answer: String },
@@ -16,11 +25,17 @@ pub enum GameEvent {
     GameEnding(UpdateResult),
 }
 
+/// An enum that represents a result from the update method of the game
+/// - `Advance(String)`: indicates to the consumer that the game should advance to the next round
+/// - `Continue(Option<String>)`: if the String is Some, indicates the game should keep in this round but
+///     print this message (usually indicates the answer of one player). If is None, it's a generic answer.
+/// - `EndGame(String)`: indicates to the consumer that the game is ended (normally) and it should print the final message
+/// - `GameOver(String)`: indicates to the consumer that the party failed on its mission and the game is over.
 pub enum UpdateResult {
-    Advance(String),          // String guarda a mensagem de erro ou de acerto do cenário!
-    Continue(Option<String>), // tem String pra exibir a resposta do usuário diante da questão, None pra qualquer outra coisa
+    Advance(String),
+    Continue(Option<String>),
     EndGame(String),
-    GameOver(String), // guarda a mensagem de erro do cenário
+    GameOver(String),
 }
 
 #[derive(Clone)]
@@ -79,8 +94,9 @@ impl GameSession {
         self.party.retain(|p| p.username != *username);
     }
 
+    /// Method that computes a game event and return UpdateResults to the consumer.
     pub fn update(&mut self, event: GameEvent) -> UpdateResult {
-        // Não permite atualizar nada do estado do jogo se não tiver iniciado ainda.
+        // Prevents updates if the game hasn't started
         if !self.has_started {
             return UpdateResult::Continue(None);
         }
@@ -92,28 +108,25 @@ impl GameSession {
                     _ => return UpdateResult::Continue(None),
                 };
 
-                // verifica acerto individual
+                // Computes the answer of the current player
                 let correct = answer
                     .trim()
                     .eq_ignore_ascii_case(&scene.options.id_correct);
 
-                // registra resposta
                 self.answers.insert(username.clone(), correct);
 
-                // se ainda falta jogador responder, nada acontece
                 if self.answers.len() < self.party.len() {
                     return UpdateResult::Continue(Some(answer));
                 }
 
-                // TODOS responderam -> aplicar maioria
+                // At this point, every player has already answered, so compute the round results.
+
                 let correct_count = self.answers.values().filter(|v| **v).count();
                 let wrong_count = self.party.len() - correct_count;
 
-                // limpa respostas para próxima rodada
                 self.answers.clear();
                 let text_result: String;
 
-                // regra principal: acertos > erros = sucesso
                 if correct_count >= wrong_count {
                     text_result = scene.success_msg.clone();
                 } else {
@@ -121,11 +134,13 @@ impl GameSession {
                     self.remaining_answers -= 1;
                 }
 
-                // Se acabou a quantidade de tentativas então acaba o jogo!
+                // If they missed all they answers, it's a game over :(
                 if self.remaining_answers <= 0 {
                     return UpdateResult::GameOver(scene.error_msg.clone());
                 }
 
+                // But if they reached a state where all scenes were completed, it's a game ending :)
+                // and the game return the ending (can be a good or bad ending)
                 if self.remaining_scenes.is_empty() {
                     return UpdateResult::EndGame(text_result);
                 }

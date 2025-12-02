@@ -33,6 +33,9 @@ struct ClientData {
     writer: Arc<Mutex<OwnedWriteHalf>>,
 }
 
+/// Represents an event associated to the TUI with the message.
+/// - `Instant(String)`: the TUI should print without any animation the message.
+/// - `Dynamic(String)`: the TUI should print with the typewriter effect based on the delay.
 enum UIJob {
     Instant(String),
     Dynamic(String, u64),
@@ -60,7 +63,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Builds TUI structure as layer stack
-    // Please read the documentation before adding new layers
     tui::build_tui(&mut siv, send_message);
 
     add_scroll_callbacks(&mut siv);
@@ -72,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (event_sender, mut event_receiver) = mpsc::unbounded_channel::<EventSignal>();
     let (ui_job_sender, mut ui_job_receiver) = mpsc::unbounded_channel::<UIJob>();
 
-    // thread de leitura de ações no buffer
+    // This threads continuously reads the buffer for new events and sends it to other threads
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
             if let Ok(msg) = serde_json::from_str::<ChatMessage>(&line) {
@@ -94,7 +96,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sink_clone = siv.cb_sink().clone();
 
-    // thread de leitura de ações na fila e que define o método correto de impressão
+    // This thread listens to event_receiver queue and dispatches new actions to
+    // ui_job thread OR handles the UI directly, if the event doesn't involves
+    // the chat.
     tokio::spawn(async move {
         while let Some(event) = event_receiver.recv().await {
             match event {
@@ -187,7 +191,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let sink_clone = siv.cb_sink().clone();
 
-    // thread que recebe as mensagens na fila e imprime DE FORMA SÍNCRONA!!
+    // This thread listens to ui_job_receiver queue and prints every message
+    // on it synchronously.
+    // Because cursive is not async-made, this thread forces concurrency, where only
+    // one resource (UIJob) have access to the terminal and can safely print.
     tokio::spawn(async move {
         while let Some(job) = ui_job_receiver.recv().await {
             match job {
@@ -201,6 +208,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .ok();
                 }
                 UIJob::Dynamic(text, delay_ms) => {
+                    // Disable the input while is printing the message,
+                    // to avoid new messages arriving and making all a mess.
                     sink_clone
                         .send(Box::new(move |siv| {
                             siv.call_on_name("chat_input", |v: &mut EnableableView<EditView>| {
@@ -209,6 +218,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }))
                         .ok();
 
+                    // Prints every char with some delay
                     for ch in text.chars() {
                         sink_clone
                             .send(Box::new(move |s| {
@@ -222,7 +232,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         std::thread::sleep(Duration::from_millis(delay_ms));
                     }
 
-                    // reabilita input ao final
+                    // Enables input at the end of animation
                     sink_clone
                         .send(Box::new(|s| {
                             s.call_on_name("chat_input", |v: &mut EnableableView<EditView>| {

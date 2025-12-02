@@ -11,7 +11,6 @@ use cursive::{
 
 use crate::client::add_scroll_callbacks;
 
-// ... restante do código
 /// Builds the entire TUI by calling the necessary setup functions.
 ///
 /// ## Why use this?
